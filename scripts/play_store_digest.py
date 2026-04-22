@@ -132,7 +132,8 @@ REVIEWS:
 SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡"}
 
 
-def build_blocks(low_star: list[dict], insights: dict) -> list[dict]:
+def build_main_blocks(low_star: list[dict], insights: dict) -> list[dict]:
+    """Main message: stats + AI insights only."""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=DAYS_BACK)
 
@@ -209,51 +210,64 @@ def build_blocks(low_star: list[dict], insights: dict) -> list[dict]:
         })
 
     blocks.append({"type": "divider"})
-
-    # ── Individual Reviews ──
     blocks.append({
         "type": "section",
-        "text": {"type": "mrkdwn", "text": f"*📝 Recent Reviews* (showing {min(total, MAX_SHOWN)} of {total})"},
+        "text": {"type": "mrkdwn", "text": f"_💬 {total} review(s) attached in thread below_"},
     })
 
-    for r in low_star[:MAX_SHOWN]:
+    return blocks
+
+
+def build_thread_blocks(low_star: list[dict]) -> list[dict]:
+    """Thread reply: all individual reviews."""
+    total = len(low_star)
+    blocks: list[dict] = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"📝 All Reviews ({total})"},
+        }
+    ]
+
+    for r in low_star:
         stars = "⭐" * r["score"]
-        date_str = r["at"].strftime("%b %d")
+        date_str = r["at"].strftime("%b %d, %Y")
         content = r["content"]
-        if len(content) > 280:
-            content = content[:280] + "…"
+        if len(content) > 350:
+            content = content[:350] + "…"
         text = f"*{stars}* _{r.get('userName', 'Anonymous')}_ · {date_str}\n>{content}"
 
         reply = r.get("replyContent") or ""
         if reply:
-            reply_short = reply[:180] + ("…" if len(reply) > 180 else "")
+            reply_short = reply[:200] + ("…" if len(reply) > 200 else "")
             text += f"\n>*Dev reply:* {reply_short}"
 
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
-
-    if total > MAX_SHOWN:
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"_…and {total - MAX_SHOWN} more. <https://play.google.com/console|Open Play Console> for the full list._",
-            },
-        })
 
     return blocks
 
 
 # ── 4. Send to Slack ─────────────────────────────────────────────────────────
 
-def send_to_slack(blocks: list[dict]) -> None:
+def send_to_slack(main_blocks: list[dict], thread_blocks: list[dict]) -> None:
     client = WebClient(token=SLACK_BOT_TOKEN)
     dm = client.conversations_open(users=[SLACK_USER_ID])
     channel_id = dm["channel"]["id"]
-    client.chat_postMessage(
+
+    # Post main digest message
+    resp = client.chat_postMessage(
         channel=channel_id,
-        blocks=blocks,
+        blocks=main_blocks,
         text="iFreed Play Store low-star review digest",
     )
+
+    # Post all reviews as a thread reply (only if there are reviews)
+    if thread_blocks:
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=resp["ts"],
+            blocks=thread_blocks,
+            text="Full review list",
+        )
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -267,6 +281,7 @@ if __name__ == "__main__":
     insights = generate_insights(low_star)
     print(f"Themes identified: {[t['title'] for t in insights.get('themes', [])]}")
 
-    blocks = build_blocks(low_star, insights)
-    send_to_slack(blocks)
+    main_blocks = build_main_blocks(low_star, insights)
+    thread_blocks = build_thread_blocks(low_star) if low_star else []
+    send_to_slack(main_blocks, thread_blocks)
     print("Digest sent to Slack.")
