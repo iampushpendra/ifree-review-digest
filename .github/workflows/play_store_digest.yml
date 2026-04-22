@@ -16,11 +16,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install google-play-scraper slack-sdk
+        run: pip install google-play-scraper slack-sdk openai
 
       - name: Send review digest to Slack
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_USER_ID: ${{ secrets.SLACK_USER_ID }}
           PLAY_STORE_APP_ID: ${{ secrets.PLAY_STORE_APP_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python scripts/play_store_digest.py
