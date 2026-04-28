@@ -2,8 +2,8 @@ name: Play Store Review Digest
 
 on:
   schedule:
-    - cron: '30 5 * * 5'  # Every Friday 11:00 AM IST (UTC+5:30)
-  workflow_dispatch:       # Manual trigger for testing
+    - cron: '30 6 * * 2,4'  # Every Tuesday & Thursday 12:00 PM IST (UTC+5:30)
+  workflow_dispatch:          # Manual trigger for testing
 
 jobs:
   review-digest:
@@ -21,7 +21,7 @@ jobs:
       - name: Send review digest to Slack
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          SLACK_USER_ID: ${{ secrets.SLACK_USER_ID }}
-          PLAY_STORE_APP_ID: ${{ secrets.PLAY_STORE_APP_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SLACK_USER_ID: ${{ vars.SLACK_USER_ID }}
+          PLAY_STORE_APP_ID: ${{ vars.PLAY_STORE_APP_ID }}
         run: python scripts/play_store_digest.py
