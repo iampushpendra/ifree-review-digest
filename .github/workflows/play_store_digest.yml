@@ -18,10 +18,29 @@ jobs:
       - name: Install dependencies
         run: pip install google-play-scraper slack-sdk openai
 
-      - name: Send review digest to Slack
+      - name: Send review digest to Slack and write Obsidian note
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SLACK_USER_ID: ${{ vars.SLACK_USER_ID }}
           PLAY_STORE_APP_ID: ${{ vars.PLAY_STORE_APP_ID }}
         run: python scripts/play_store_digest.py
+
+      - name: Push note to Obsidian vault
+        env:
+          VAULT_DEPLOY_KEY: ${{ secrets.VAULT_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$VAULT_DEPLOY_KEY" > ~/.ssh/vault_key
+          chmod 600 ~/.ssh/vault_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/vault_key"
+
+          git clone git@github.com:iampushpendra/dev-brain.git vault
+          cp -r vault-output/. vault/
+          cd vault
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add projects/ifree-reviews/
+          git diff --cached --quiet || git commit -m "digest: Play Store review digest $(date -u +%Y-%m-%d)"
+          git push

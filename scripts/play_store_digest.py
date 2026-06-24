@@ -246,7 +246,79 @@ def build_thread_blocks(low_star: list[dict]) -> list[dict]:
     return blocks
 
 
-# ── 4. Send to Slack ─────────────────────────────────────────────────────────
+# ── 4. Write Obsidian note ───────────────────────────────────────────────────
+
+SEVERITY_ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡"}
+
+
+def write_obsidian_note(low_star: list[dict], insights: dict, output_path: str) -> None:
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=DAYS_BACK)
+
+    star_counts = {1: 0, 2: 0, 3: 0}
+    for r in low_star:
+        star_counts[r["score"]] += 1
+    total = len(low_star)
+
+    lines = [
+        f"---",
+        f"date: {now.strftime('%Y-%m-%d')}",
+        f"tags: [play-store, reviews, digest]",
+        f"---",
+        f"",
+        f"# iFreed Play Store Digest — {now.strftime('%b %d, %Y')}",
+        f"",
+        f"**Period:** {cutoff.strftime('%b %d')} – {now.strftime('%b %d, %Y')}  |  **Total:** {total} review(s)",
+        f"⭐ 1-star: **{star_counts[1]}** · ⭐⭐ 2-star: **{star_counts[2]}** · ⭐⭐⭐ 3-star: **{star_counts[3]}**",
+        f"",
+        f"## 🧠 AI Summary",
+        f"",
+        f"{insights['summary']}",
+        f"",
+    ]
+
+    if insights.get("themes"):
+        lines += ["## 📊 Recurring Themes", ""]
+        for t in insights["themes"]:
+            icon = SEVERITY_ICON.get(t.get("severity", "medium"), "🟡")
+            lines.append(f"- {icon} **{t['title']}** ({t['count']} reviews) — {t['description']}")
+        lines.append("")
+
+    if insights.get("top_issues"):
+        lines += ["## 🔧 Action Items", ""]
+        for issue in insights["top_issues"]:
+            lines.append(f"- {issue}")
+        lines.append("")
+
+    if insights.get("positive_notes"):
+        lines += ["## ✅ Silver Linings", ""]
+        for note in insights["positive_notes"]:
+            lines.append(f"- {note}")
+        lines.append("")
+
+    if low_star:
+        lines += ["## 📝 All Reviews", ""]
+        for r in low_star:
+            stars = "⭐" * r["score"]
+            date_str = r["at"].strftime("%b %d, %Y")
+            content = r["content"].replace("\n", " ")
+            lines.append(f"### {stars} {r.get('userName', 'Anonymous')} · {date_str}")
+            lines.append(f"")
+            lines.append(f"> {content}")
+            reply = r.get("replyContent") or ""
+            if reply:
+                lines.append(f"")
+                lines.append(f"> **Dev reply:** {reply.replace(chr(10), ' ')}")
+            lines.append("")
+
+    import os
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"Obsidian note written to {output_path}")
+
+
+# ── 5. Send to Slack ─────────────────────────────────────────────────────────
 
 def send_to_slack(main_blocks: list[dict], thread_blocks: list[dict]) -> None:
     client = WebClient(token=SLACK_BOT_TOKEN)
@@ -285,3 +357,7 @@ if __name__ == "__main__":
     thread_blocks = build_thread_blocks(low_star) if low_star else []
     send_to_slack(main_blocks, thread_blocks)
     print("Digest sent to Slack.")
+
+    note_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    write_obsidian_note(low_star, insights, f"vault-output/projects/ifree-reviews/{note_date}.md")
+    print("Obsidian note written.")
