@@ -1,5 +1,5 @@
 """
-Daily Play Store low-star review digest → Slack DM.
+Weekly Play Store review digest (all ratings) → Slack DM.
 Includes AI-generated semantic insights via OpenAI.
 
 Required env vars:
@@ -22,14 +22,14 @@ SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 SLACK_USER_ID = os.environ["SLACK_USER_ID"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-LOW_STAR_RATINGS = {1, 2, 3}
 DAYS_BACK = 7
 MAX_SHOWN = 8
 
 
 # ── 1. Fetch reviews ─────────────────────────────────────────────────────────
 
-def fetch_low_star_reviews() -> list[dict]:
+def fetch_reviews() -> list[dict]:
+    """Fetch all reviews (every rating) from the last DAYS_BACK days."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_BACK)
     collected: list[dict] = []
     continuation_token = None
@@ -55,8 +55,7 @@ def fetch_low_star_reviews() -> list[dict]:
             if review_date < cutoff:
                 return collected  # newest-first — safe to stop here
 
-            if r["score"] in LOW_STAR_RATINGS:
-                collected.append(r)
+            collected.append(r)
 
         if not continuation_token:
             break
@@ -66,49 +65,49 @@ def fetch_low_star_reviews() -> list[dict]:
 
 # ── 2. AI insights ───────────────────────────────────────────────────────────
 
-def generate_insights(low_star: list[dict]) -> dict:
+def generate_insights(all_reviews: list[dict]) -> dict:
     """
     Returns a dict with keys:
       summary        — 2-3 sentence executive summary
       themes         — list of {title, count, severity, description}
       top_issues     — list of short actionable strings
-      positive_notes — list of any silver linings mentioned
+      positive_notes — list of things users praised
     """
-    if not low_star:
+    if not all_reviews:
         return {
-            "summary": "No low-star reviews this week. Keep it up!",
+            "summary": "No reviews this week.",
             "themes": [],
             "top_issues": [],
             "positive_notes": [],
         }
 
     reviews_text = "\n\n".join(
-        f"[{r['score']}★] {r['content']}" for r in low_star
+        f"[{r['score']}★] {r['content']}" for r in all_reviews
     )
 
     prompt = f"""You are a product analyst for iFreed, a mental health / therapy app.
-Below are {len(low_star)} low-star (1–3 star) Play Store reviews from the last 7 days.
+Below are {len(all_reviews)} Play Store reviews (all ratings, 1–5 stars) from the last 7 days.
 
-Analyse them and respond with a JSON object (no markdown, raw JSON only) with exactly these keys:
+Analyse the full spread of sentiment and respond with a JSON object (no markdown, raw JSON only) with exactly these keys:
 
 {{
-  "summary": "<2-3 sentence executive summary of the week's user pain>",
+  "summary": "<2-3 sentence executive summary of overall user sentiment this week, covering both what users love and where they struggle>",
   "themes": [
     {{
       "title": "<short theme name>",
       "count": <number of reviews mentioning this>,
-      "severity": "<critical|high|medium>",
+      "severity": "<critical|high|medium|positive>",
       "description": "<1 sentence describing the pattern>"
     }}
   ],
   "top_issues": ["<actionable issue 1>", "<actionable issue 2>", ...],
-  "positive_notes": ["<any silver lining or positive mention>", ...]
+  "positive_notes": ["<what users praised 1>", "<what users praised 2>", ...]
 }}
 
 Rules:
-- themes: list the top 3-5 themes, ordered by count descending
-- top_issues: max 5, each under 12 words, phrased as engineering/product action items
-- positive_notes: only include if genuinely present; empty list if none
+- themes: list the top 3-5 themes across ALL reviews, ordered by count descending; use severity "positive" for praise themes and critical/high/medium for problems
+- top_issues: max 5, each under 12 words, phrased as engineering/product action items (drawn from the negative/critical reviews)
+- positive_notes: what users genuinely liked; empty list if none
 - Be specific — reference actual feature names or flows mentioned in reviews
 
 REVIEWS:
@@ -129,25 +128,33 @@ REVIEWS:
 
 # ── 3. Build Slack blocks ────────────────────────────────────────────────────
 
-SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡"}
+SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡", "positive": "🟢"}
 
 
-def build_main_blocks(low_star: list[dict], insights: dict) -> list[dict]:
+def compute_star_stats(all_reviews: list[dict]) -> tuple[dict, float]:
+    """Return per-rating counts (1-5) and the average rating."""
+    star_counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for r in all_reviews:
+        star_counts[r["score"]] += 1
+    total = len(all_reviews)
+    avg = sum(s * c for s, c in star_counts.items()) / total if total else 0.0
+    return star_counts, avg
+
+
+def build_main_blocks(all_reviews: list[dict], insights: dict) -> list[dict]:
     """Main message: stats + AI insights only."""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=DAYS_BACK)
 
-    star_counts = {1: 0, 2: 0, 3: 0}
-    for r in low_star:
-        star_counts[r["score"]] += 1
-    total = len(low_star)
+    star_counts, avg = compute_star_stats(all_reviews)
+    total = len(all_reviews)
 
     blocks: list[dict] = []
 
     # Header
     blocks.append({
         "type": "header",
-        "text": {"type": "plain_text", "text": "📱 iFreed — Low-Star Review Digest (Last 7 Days)"},
+        "text": {"type": "plain_text", "text": "📱 iFreed — Weekly Review Digest (Last 7 Days)"},
     })
 
     # Stats row
@@ -157,10 +164,12 @@ def build_main_blocks(low_star: list[dict], insights: dict) -> list[dict]:
             "type": "mrkdwn",
             "text": (
                 f"*Period:* {cutoff.strftime('%b %d')} – {now.strftime('%b %d, %Y')}  |  "
-                f"*Total:* {total} review(s)\n"
-                f"⭐ 1-star: *{star_counts[1]}*  ·  "
-                f"⭐⭐ 2-star: *{star_counts[2]}*  ·  "
-                f"⭐⭐⭐ 3-star: *{star_counts[3]}*"
+                f"*Total:* {total} review(s)  |  *Avg:* {avg:.1f}★\n"
+                f"⭐ 1: *{star_counts[1]}*  ·  "
+                f"⭐ 2: *{star_counts[2]}*  ·  "
+                f"⭐ 3: *{star_counts[3]}*  ·  "
+                f"⭐ 4: *{star_counts[4]}*  ·  "
+                f"⭐ 5: *{star_counts[5]}*"
             ),
         },
     })
@@ -170,7 +179,7 @@ def build_main_blocks(low_star: list[dict], insights: dict) -> list[dict]:
     if total == 0:
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": "_No low-star reviews this week. 🎉_"},
+            "text": {"type": "mrkdwn", "text": "_No reviews this week._"},
         })
         return blocks
 
@@ -206,7 +215,7 @@ def build_main_blocks(low_star: list[dict], insights: dict) -> list[dict]:
         note_lines = [f"• {note}" for note in insights["positive_notes"]]
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": "*✅ Silver Linings*\n" + "\n".join(note_lines)},
+            "text": {"type": "mrkdwn", "text": "*✅ What Users Loved*\n" + "\n".join(note_lines)},
         })
 
     blocks.append({"type": "divider"})
@@ -218,47 +227,59 @@ def build_main_blocks(low_star: list[dict], insights: dict) -> list[dict]:
     return blocks
 
 
-def build_thread_blocks(low_star: list[dict]) -> list[dict]:
-    """Thread reply: all individual reviews."""
-    total = len(low_star)
-    blocks: list[dict] = [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": f"📝 All Reviews ({total})"},
-        }
-    ]
+# Slack allows at most 50 blocks per message; chunk well under that.
+THREAD_CHUNK_SIZE = 45
 
-    for r in low_star:
-        stars = "⭐" * r["score"]
-        date_str = r["at"].strftime("%b %d, %Y")
-        content = r["content"]
-        if len(content) > 350:
-            content = content[:350] + "…"
-        text = f"*{stars}* _{r.get('userName', 'Anonymous')}_ · {date_str}\n>{content}"
 
-        reply = r.get("replyContent") or ""
-        if reply:
-            reply_short = reply[:200] + ("…" if len(reply) > 200 else "")
-            text += f"\n>*Dev reply:* {reply_short}"
+def _review_block(r: dict) -> dict:
+    stars = "⭐" * r["score"]
+    date_str = r["at"].strftime("%b %d, %Y")
+    content = r["content"]
+    if len(content) > 350:
+        content = content[:350] + "…"
+    text = f"*{stars}* _{r.get('userName', 'Anonymous')}_ · {date_str}\n>{content}"
 
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
+    reply = r.get("replyContent") or ""
+    if reply:
+        reply_short = reply[:200] + ("…" if len(reply) > 200 else "")
+        text += f"\n>*Dev reply:* {reply_short}"
 
-    return blocks
+    return {"type": "section", "text": {"type": "mrkdwn", "text": text}}
+
+
+def build_thread_messages(all_reviews: list[dict]) -> list[list[dict]]:
+    """
+    Thread replies: all individual reviews, split into multiple messages so no
+    single message exceeds Slack's 50-block limit. Returns a list of block lists.
+    """
+    total = len(all_reviews)
+    messages: list[list[dict]] = []
+
+    for i in range(0, total, THREAD_CHUNK_SIZE):
+        chunk = all_reviews[i:i + THREAD_CHUNK_SIZE]
+        part = i // THREAD_CHUNK_SIZE + 1
+        parts = (total + THREAD_CHUNK_SIZE - 1) // THREAD_CHUNK_SIZE
+        header = f"📝 All Reviews ({total})" if parts == 1 else f"📝 All Reviews ({total}) — part {part}/{parts}"
+        blocks: list[dict] = [
+            {"type": "header", "text": {"type": "plain_text", "text": header}}
+        ]
+        blocks.extend(_review_block(r) for r in chunk)
+        messages.append(blocks)
+
+    return messages
 
 
 # ── 4. Write Obsidian note ───────────────────────────────────────────────────
 
-SEVERITY_ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡"}
+SEVERITY_ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡", "positive": "🟢"}
 
 
-def write_obsidian_note(low_star: list[dict], insights: dict, output_path: str) -> None:
+def write_obsidian_note(all_reviews: list[dict], insights: dict, output_path: str) -> None:
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=DAYS_BACK)
 
-    star_counts = {1: 0, 2: 0, 3: 0}
-    for r in low_star:
-        star_counts[r["score"]] += 1
-    total = len(low_star)
+    star_counts, avg = compute_star_stats(all_reviews)
+    total = len(all_reviews)
 
     lines = [
         f"---",
@@ -268,8 +289,8 @@ def write_obsidian_note(low_star: list[dict], insights: dict, output_path: str) 
         f"",
         f"# iFreed Play Store Digest — {now.strftime('%b %d, %Y')}",
         f"",
-        f"**Period:** {cutoff.strftime('%b %d')} – {now.strftime('%b %d, %Y')}  |  **Total:** {total} review(s)",
-        f"⭐ 1-star: **{star_counts[1]}** · ⭐⭐ 2-star: **{star_counts[2]}** · ⭐⭐⭐ 3-star: **{star_counts[3]}**",
+        f"**Period:** {cutoff.strftime('%b %d')} – {now.strftime('%b %d, %Y')}  |  **Total:** {total} review(s)  |  **Avg:** {avg:.1f}★",
+        f"⭐ 1: **{star_counts[1]}** · ⭐ 2: **{star_counts[2]}** · ⭐ 3: **{star_counts[3]}** · ⭐ 4: **{star_counts[4]}** · ⭐ 5: **{star_counts[5]}**",
         f"",
         f"## 🧠 AI Summary",
         f"",
@@ -291,14 +312,14 @@ def write_obsidian_note(low_star: list[dict], insights: dict, output_path: str) 
         lines.append("")
 
     if insights.get("positive_notes"):
-        lines += ["## ✅ Silver Linings", ""]
+        lines += ["## ✅ What Users Loved", ""]
         for note in insights["positive_notes"]:
             lines.append(f"- {note}")
         lines.append("")
 
-    if low_star:
+    if all_reviews:
         lines += ["## 📝 All Reviews", ""]
-        for r in low_star:
+        for r in all_reviews:
             stars = "⭐" * r["score"]
             date_str = r["at"].strftime("%b %d, %Y")
             content = r["content"].replace("\n", " ")
@@ -320,7 +341,7 @@ def write_obsidian_note(low_star: list[dict], insights: dict, output_path: str) 
 
 # ── 5. Send to Slack ─────────────────────────────────────────────────────────
 
-def send_to_slack(main_blocks: list[dict], thread_blocks: list[dict]) -> None:
+def send_to_slack(main_blocks: list[dict], thread_messages: list[list[dict]]) -> None:
     client = WebClient(token=SLACK_BOT_TOKEN)
     dm = client.conversations_open(users=[SLACK_USER_ID])
     channel_id = dm["channel"]["id"]
@@ -329,15 +350,15 @@ def send_to_slack(main_blocks: list[dict], thread_blocks: list[dict]) -> None:
     resp = client.chat_postMessage(
         channel=channel_id,
         blocks=main_blocks,
-        text="iFreed Play Store low-star review digest",
+        text="iFreed Play Store weekly review digest",
     )
 
-    # Post all reviews as a thread reply (only if there are reviews)
-    if thread_blocks:
+    # Post all reviews as one or more thread replies (chunked under Slack's block limit)
+    for blocks in thread_messages:
         client.chat_postMessage(
             channel=channel_id,
             thread_ts=resp["ts"],
-            blocks=thread_blocks,
+            blocks=blocks,
             text="Full review list",
         )
 
@@ -346,18 +367,18 @@ def send_to_slack(main_blocks: list[dict], thread_blocks: list[dict]) -> None:
 
 if __name__ == "__main__":
     print(f"Fetching reviews for {APP_ID}...")
-    low_star = fetch_low_star_reviews()
-    print(f"Found {len(low_star)} low-star review(s) in last {DAYS_BACK} days")
+    all_reviews = fetch_reviews()
+    print(f"Found {len(all_reviews)} review(s) in last {DAYS_BACK} days")
 
     print("Generating AI insights...")
-    insights = generate_insights(low_star)
+    insights = generate_insights(all_reviews)
     print(f"Themes identified: {[t['title'] for t in insights.get('themes', [])]}")
 
-    main_blocks = build_main_blocks(low_star, insights)
-    thread_blocks = build_thread_blocks(low_star) if low_star else []
-    send_to_slack(main_blocks, thread_blocks)
+    main_blocks = build_main_blocks(all_reviews, insights)
+    thread_messages = build_thread_messages(all_reviews) if all_reviews else []
+    send_to_slack(main_blocks, thread_messages)
     print("Digest sent to Slack.")
 
     note_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    write_obsidian_note(low_star, insights, f"vault-output/projects/ifree-reviews/{note_date}.md")
+    write_obsidian_note(all_reviews, insights, f"vault-output/projects/ifree-reviews/{note_date}.md")
     print("Obsidian note written.")

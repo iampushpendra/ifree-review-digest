@@ -1,12 +1,12 @@
 # iFreed Play Store Review Digest
 
-Daily Slack digest of 1–3 star Play Store reviews for the iFreed app, delivered at **10:00 AM IST** via GitHub Actions.
+Weekly Slack digest of all Play Store reviews for the iFreed app, delivered every **Monday at 12:00 PM IST** via GitHub Actions.
 
 ## What it does
 
-- Runs every day at 10:00 AM IST (4:30 AM UTC)
-- Fetches all 1, 2, and 3-star Play Store reviews from the last 7 days
-- Sends a formatted Slack DM with a star-count summary + up to 10 individual reviews
+- Runs weekly, every Monday at 12:00 PM IST (6:30 AM UTC)
+- Fetches all Play Store reviews (every rating, 1–5 stars) from the last 7 days
+- Sends a formatted Slack DM with a star-count summary, average rating, and AI insights, plus every individual review threaded below (chunked to stay under Slack's block limit)
 
 ## Setup
 
