@@ -22,6 +22,7 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
           SLACK_USER_ID: ${{ vars.SLACK_USER_ID }}
           PLAY_STORE_APP_ID: ${{ vars.PLAY_STORE_APP_ID }}
         run: python scripts/play_store_digest.py

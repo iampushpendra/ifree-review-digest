@@ -1,12 +1,16 @@
 """
-Weekly Play Store review digest (all ratings) → Slack DM.
+Weekly Play Store review digest (all ratings) → Slack channel.
 Includes AI-generated semantic insights via OpenAI.
 
 Required env vars:
   PLAY_STORE_APP_ID  — e.g. com.ifreed
-  SLACK_BOT_TOKEN    — xoxb-... bot token with chat:write + im:write scopes
-  SLACK_USER_ID      — Slack user ID to DM (e.g. U012AB3CD)
+  SLACK_BOT_TOKEN    — xoxb-... bot token with chat:write scope
   OPENAI_API_KEY     — for semantic analysis and insights
+
+Delivery target (one of):
+  SLACK_CHANNEL_ID   — channel to post into (e.g. C0123ABCD). The bot must be a
+                       member of the channel (invite it: /invite @<bot> ).
+  SLACK_USER_ID      — fallback: DM this user (e.g. U012AB3CD) if no channel set.
 """
 
 import json
@@ -19,8 +23,12 @@ from slack_sdk import WebClient
 
 APP_ID = os.environ["PLAY_STORE_APP_ID"]
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
-SLACK_USER_ID = os.environ["SLACK_USER_ID"]
+SLACK_CHANNEL_ID = os.environ.get("SLACK_CHANNEL_ID")
+SLACK_USER_ID = os.environ.get("SLACK_USER_ID")
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+
+if not SLACK_CHANNEL_ID and not SLACK_USER_ID:
+    raise SystemExit("Set SLACK_CHANNEL_ID (preferred) or SLACK_USER_ID.")
 
 DAYS_BACK = 7
 MAX_SHOWN = 8
@@ -343,8 +351,13 @@ def write_obsidian_note(all_reviews: list[dict], insights: dict, output_path: st
 
 def send_to_slack(main_blocks: list[dict], thread_messages: list[list[dict]]) -> None:
     client = WebClient(token=SLACK_BOT_TOKEN)
-    dm = client.conversations_open(users=[SLACK_USER_ID])
-    channel_id = dm["channel"]["id"]
+    if SLACK_CHANNEL_ID:
+        # Post into a channel (the bot must be a member of it).
+        channel_id = SLACK_CHANNEL_ID
+    else:
+        # Fallback: open a DM with the user.
+        dm = client.conversations_open(users=[SLACK_USER_ID])
+        channel_id = dm["channel"]["id"]
 
     # Post main digest message
     resp = client.chat_postMessage(
