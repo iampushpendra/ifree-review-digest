@@ -1,6 +1,6 @@
-# iFreed Play Store Review Digest
+# Freed Play Store Review Digest
 
-Weekly Slack digest of all Play Store reviews for the iFreed app, delivered every **Tuesday at 5:00 PM IST** via GitHub Actions.
+Weekly Slack digest of all Play Store reviews for the Freed app, delivered every **Tuesday at 5:00 PM IST** via GitHub Actions.
 
 ## What it does
 

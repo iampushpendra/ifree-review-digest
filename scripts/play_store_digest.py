@@ -93,7 +93,7 @@ def generate_insights(all_reviews: list[dict]) -> dict:
         f"[{r['score']}★] {r['content']}" for r in all_reviews
     )
 
-    prompt = f"""You are a product analyst for iFreed, a mental health / therapy app.
+    prompt = f"""You are a product analyst for Freed, a mental health / therapy app.
 Below are {len(all_reviews)} Play Store reviews (all ratings, 1–5 stars) from the last 7 days.
 
 Analyse the full spread of sentiment and respond with a JSON object (no markdown, raw JSON only) with exactly these keys:
@@ -162,7 +162,7 @@ def build_main_blocks(all_reviews: list[dict], insights: dict) -> list[dict]:
     # Header
     blocks.append({
         "type": "header",
-        "text": {"type": "plain_text", "text": "📱 iFreed — Weekly Review Digest (Last 7 Days)"},
+        "text": {"type": "plain_text", "text": "📱 Freed — Weekly Review Digest (Last 7 Days)"},
     })
 
     # Stats row
@@ -295,7 +295,7 @@ def write_obsidian_note(all_reviews: list[dict], insights: dict, output_path: st
         f"tags: [play-store, reviews, digest]",
         f"---",
         f"",
-        f"# iFreed Play Store Digest — {now.strftime('%b %d, %Y')}",
+        f"# Freed Play Store Digest — {now.strftime('%b %d, %Y')}",
         f"",
         f"**Period:** {cutoff.strftime('%b %d')} – {now.strftime('%b %d, %Y')}  |  **Total:** {total} review(s)  |  **Avg:** {avg:.1f}★",
         f"⭐ 1: **{star_counts[1]}** · ⭐ 2: **{star_counts[2]}** · ⭐ 3: **{star_counts[3]}** · ⭐ 4: **{star_counts[4]}** · ⭐ 5: **{star_counts[5]}**",
@@ -363,7 +363,7 @@ def send_to_slack(main_blocks: list[dict], thread_messages: list[list[dict]]) ->
     resp = client.chat_postMessage(
         channel=channel_id,
         blocks=main_blocks,
-        text="iFreed Play Store weekly review digest",
+        text="Freed Play Store weekly review digest",
     )
 
     # Post all reviews as one or more thread replies (chunked under Slack's block limit)
