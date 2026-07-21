@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from google_play_scraper import Sort, reviews
 from openai import OpenAI
 from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 APP_ID = os.environ["PLAY_STORE_APP_ID"]
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
@@ -349,6 +350,27 @@ def write_obsidian_note(all_reviews: list[dict], insights: dict, output_path: st
 
 # ── 5. Send to Slack ─────────────────────────────────────────────────────────
 
+# Sender identity shown on every posted message. Overriding it per-message keeps
+# the name consistent regardless of the Slack app's configured bot display name,
+# but it requires the `chat:write.customize` scope — if that scope is missing we
+# fall back to a plain post (which then shows the app's own bot name).
+SENDER_NAME = "Play Store Reviews"
+SENDER_ICON = ":iphone:"
+
+
+def _post(client: WebClient, **kwargs) -> dict:
+    try:
+        return client.chat_postMessage(
+            username=SENDER_NAME, icon_emoji=SENDER_ICON, **kwargs
+        )
+    except SlackApiError as e:
+        err = e.response.get("error", "")
+        if err in ("missing_scope", "not_allowed_token_type", "invalid_arguments"):
+            # `chat:write.customize` not granted — post without the custom identity.
+            return client.chat_postMessage(**kwargs)
+        raise
+
+
 def send_to_slack(main_blocks: list[dict], thread_messages: list[list[dict]]) -> None:
     client = WebClient(token=SLACK_BOT_TOKEN)
     if SLACK_CHANNEL_ID:
@@ -360,7 +382,8 @@ def send_to_slack(main_blocks: list[dict], thread_messages: list[list[dict]]) ->
         channel_id = dm["channel"]["id"]
 
     # Post main digest message
-    resp = client.chat_postMessage(
+    resp = _post(
+        client,
         channel=channel_id,
         blocks=main_blocks,
         text="Freed Play Store weekly review digest",
@@ -368,7 +391,8 @@ def send_to_slack(main_blocks: list[dict], thread_messages: list[list[dict]]) ->
 
     # Post all reviews as one or more thread replies (chunked under Slack's block limit)
     for blocks in thread_messages:
-        client.chat_postMessage(
+        _post(
+            client,
             channel=channel_id,
             thread_ts=resp["ts"],
             blocks=blocks,
